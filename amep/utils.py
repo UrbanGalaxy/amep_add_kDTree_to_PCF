@@ -80,7 +80,7 @@ def traj_slice(N: int, skip: float, nr_averages: int) -> slice:
 def average_func(
         func: callable, data: list | np.ndarray, skip: float = 0.0,
         nr: int = 10, indices: bool = False, 
-        max_workers: int | None = 1,
+        max_workers: int | None = 1, max_N_eval: int = None,
         **kwargs):
     r'''
     Compute the average of a certain function.
@@ -105,6 +105,8 @@ def average_func(
         `concurrent.futures.ThreadPoolExecutor`. `None` uses all
         available CPU cores. Negative numbers will be translated
         to `AVAILABLE_CPUS + max_workers`.
+    max_N_eval: int, optional
+        Number of last frame average_func should evaluate func for
     **kwargs: Keyword Arguments
         keyword arguments that are put to func
 
@@ -150,8 +152,16 @@ def average_func(
 
     if(nr == None or nr > N - skip * N):
         nr = max(1,int(N-skip*N))
+    # default behaviour unchanged
+    if max_N_eval is None:
+        max_N_eval = N - 1
 
-    evaluated_indices = np.array(np.ceil(np.linspace(skip*N, N-1, nr)), dtype=int)
+    # cap nr to the number of evaluable points
+    if nr > max_N_eval - int(skip * N) + 1:
+        nr = max_N_eval - int(skip * N) + 1
+
+    evaluated_indices = np.array(np.ceil(np.linspace(skip * N, max_N_eval, nr)), dtype=int)
+
     # keep previous implementation for safe backwards compatibility
     if max_workers==1:
         # kept for backwards compatibility

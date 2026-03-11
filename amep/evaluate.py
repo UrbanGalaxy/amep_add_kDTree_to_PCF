@@ -4526,7 +4526,10 @@ class OACF(BaseEvaluation):
     def __init__(self, traj: ParticleTrajectory, ptype=None, skip=0.0, 
                  nav: int | None = 10, 
                  direction: str = 'xyz',
-                 max_workers: int | None = 1
+                 max_workers: int | None = 1,
+                 mode: str = 'std',
+                 max_lag_fraction: float = 0.5,
+                 max_lag_step: int = 20,
                  )-> None:
         r'''
         Calculate the orientational autocorrelation function
@@ -4550,6 +4553,15 @@ class OACF(BaseEvaluation):
         max_workers : int or None, optional
             Number of parallel workers. Will be forwarded to
             `utils.average_func`.
+        mode :  str, optional
+            Lets you either compute the OACF for for a single reference frame0 or for a list
+            of frame0´s according to max_lag_fraction
+        max_lag_fraction: float, optional
+            max_lag_fraction defines the amount of frame0 the OACF is calculated for if mode
+            'lag_frame' is used.
+        max_lag_step: int, optional
+            defines the amount of steps OACF is calculated over all frames if mode 
+            'lag_step' is used.
 
         Returns
         -------
@@ -4595,6 +4607,15 @@ class OACF(BaseEvaluation):
         self.__skip      = skip
         self.__nav       = nav
         self.__max_workers = max_workers
+        self.__mode = mode
+        self.__max_lag_fraction = max_lag_fraction
+        self.__max_lag_step = max_lag_step
+        
+        if self.__mode not in ['std', 'lag_step', 'lag_frame']:
+            raise ValueError(
+                "Mode not recognized. Possible values are"
+                "std, lag_step and lag_frame."
+            )
         
         # get directions to be considered
         self.__components = []
@@ -4615,21 +4636,77 @@ class OACF(BaseEvaluation):
         
         if self.__nav is None:
             self.__nav = self.__traj.nframes
-            
+
         # get the reference frame at t0
         self.__frame0 = self.__traj[self.__nskip]
-        
-        # main calculation
-        self.__frames, self.__avg, self.__indices = average_func(
-            self.__compute, self.__traj, skip=self.__skip,
-            nr=self.__nav, indices=True,
-            max_workers=self.__max_workers
-        )
 
-        # get times
-        self.__times = self.__traj.times[self.__indices]         
+        if self.__mode == "std":
+            self.__frames, self.__avg, self.__indices = average_func(
+                self.__compute, self.__traj, skip=self.__skip,
+                nr=self.__nav, indices=True,
+                max_workers=self.__max_workers
+            )
+
+        elif self.__mode == "lag_step":
+            # Preload all usable orientations into memory once to avoid
+            # repeated h5 reads inside the inner origin loop
+            self.__orientations = np.array([
+                self.__traj[i].orientations(ptype=self.__ptype)[:, self.__components]
+                for i in range(self.__nskip, self.__traj.nframes)
+            ])  # shape: (n_usable, n_particles, n_components)
+
+            # Store the first usable index so __compute_lag can derive lags correctly
+            self.__first_index = int(np.ceil(self.__skip * self.__traj.nframes))
+            max_N_eval = int(self.__nskip + self.__max_lag_step) - 1
+            print(max_N_eval)
+            self.__frames, self.__avg, self.__indices = average_func(
+                self.__compute_lag_step, self.__traj, skip=self.__skip,
+                nr=self.__nav, indices=True,
+                max_workers=self.__max_workers,
+                max_N_eval=max_N_eval,
+            )
+
+        elif self.__mode == "lag_frame":
+            self.__orientations = np.array([
+                self.__traj[i].orientations(ptype=self.__ptype)[:, self.__components]
+                for i in range(self.__nskip, self.__traj.nframes)
+            ])  # shape: (n_usable, N, d)
+
+            n_usable = self.__orientations.shape[0]
+            
+
+            # max_lag_fraction controls what fraction of usable frames are used as origins
+            max_origins = int(n_usable * self.__max_lag_fraction)
+            n_origins = min(self.__nav, max_origins)
+            # n_origins = min(self.__nav, n_usable)
+            origin_indices = np.array(
+                np.ceil(np.linspace(0, n_usable - 1, n_origins)), dtype=int
+            )
+            origin_frames = np.array(
+                [self.__traj[self.__nskip + oi] for oi in origin_indices],
+                dtype=object
+            )
+
+            # average_func iterates over origin_frames, __compute_lag returns
+            # a full curve per origin, average_func averages them into one curve
+            raw, _, _ = average_func(
+                self.__compute_lag_frame, origin_frames, skip=0.0,
+                nr=n_origins, indices=True,
+                max_workers=self.__max_workers
+            )  # raw shape: (n_origins, n_usable)
+
+            self.__frames  = np.nanmean(raw, axis=0)
+            self.__avg     = float(np.nanmean(self.__frames))
+            self.__times   = self.__traj.times[self.__nskip:self.__nskip + n_usable] \
+                        - self.__traj.times[self.__nskip]
+            self.__indices = np.arange(self.__nskip, self.__nskip + n_usable)
+
+        if self.__mode == "lag":
+            self.__times = self.__traj.times[self.__indices] - self.__traj.times[self.__indices[0]]
+        else:
+            self.__times = self.__traj.times[self.__indices]     
         
-    def __compute(self, frame):
+    def __compute(self, frame, frame0 = None):
         r'''
         Computation for a single frame.
 
@@ -4644,11 +4721,84 @@ class OACF(BaseEvaluation):
             Orientation autocorrelation function.
 
         '''
-        v0 = self.__frame0.orientations(ptype=self.__ptype)
+        if frame0 == None:
+            frame0 = self.__frame0
+
+        v0 = frame0.orientations(ptype=self.__ptype)
         v = frame.orientations(ptype=self.__ptype)
 
         return acf(v0[:,self.__components], v[:,self.__components])
-            
+    
+    def __compute_lag_frame(self, frame):
+        r'''
+        Compute the full OACF curve for a single origin frame.
+        Returns an array of length n_usable, nan-padded beyond
+        the available lags for this origin.
+
+        Parameters
+        ----------
+        frame : BaseFrame
+            The origin frame (frame0) for this OACF curve.
+
+        Returns
+        -------
+        np.ndarray
+            OACF values of length n_usable.
+        '''
+        j = np.searchsorted(self.__traj.times, frame.time)
+        oi = j - self.__nskip  # index into self.__orientations
+
+        n_usable = self.__orientations.shape[0]
+        v0   = self.__orientations[oi]       # (N, d)
+        norm = (v0 * v0).sum(axis=-1).mean()
+
+        vt   = self.__orientations[oi:]      # (n_lags, N, d)
+        n_lags = vt.shape[0]
+
+        result = np.full(n_usable, np.nan)
+        result[:n_lags] = (v0 * vt).sum(axis=-1).mean(axis=1) / norm
+
+        return result
+    def __compute_lag_step(self, frame):
+        r'''
+        Computation for a single frame in lag mode.
+        Averages mu(t0) · mu(t0 + lag) over all valid time origins t0,
+        using preloaded orientation arrays.
+
+        Parameters
+        ----------
+        frame : BaseFrame
+            Frame representing the lag point Δt.
+
+        Returns
+        -------
+        float
+            OACF averaged over all time origins for this lag.
+        '''
+        # Derive lag in frames: absolute index minus first evaluated index
+        j = np.searchsorted(self.__traj.times, frame.time)
+        lag = j - self.__first_index
+
+        n_usable = self.__orientations.shape[0]
+        max_lag = int(n_usable * self.__max_lag_fraction)
+
+        if lag <= 0:
+            return 1.0
+
+        lag = min(lag, max_lag)
+
+        n_origins = n_usable - lag
+
+        # shapes: (n_origins, n_particles, n_components)
+        v0 = self.__orientations[:n_origins]
+        vt = self.__orientations[lag:lag + n_origins]
+
+        # dot product summed over components, then averaged over particles and origins
+        dot  = (v0 * vt).sum(axis=-1).mean()
+        norm = (v0 * v0).sum(axis=-1).mean()
+
+        return dot / norm
+
     @property
     def direction(self):
         r'''

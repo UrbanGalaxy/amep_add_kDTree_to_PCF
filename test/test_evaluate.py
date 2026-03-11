@@ -25,6 +25,7 @@ from amep.load import traj
 from amep.evaluate import ClusterGrowth, ClusterSizeDist, Function, SpatialVelCor, RDF, PCF2d, PCFangle, SF2d
 from amep.evaluate import VelDist, Dist, EkinRot, EkinTrans, EkinTot
 from amep.evaluate import MSD
+import numpy as np
 
 use("Agg")
 DATA_DIR = Path("../examples/data/")
@@ -151,3 +152,125 @@ class TestEvaluateMethods(unittest.TestCase):
         self.assertTrue(np.all(msd_3.avg==msd_4.avg),
             '`None` thread result differs from 1 thread result'
         )
+
+from amep.load import traj
+from amep.evaluate import OACF
+class TestOACFModeConvergence(unittest.TestCase):
+    """Check that lag_frame and lag_step agree when all frames are used."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.traj = traj(DATA_DIR / "lammps.h5amep")
+        n = cls.traj.nframes
+
+        # --- lag_frame at full extent (all usable frames are origins) ---
+        cls.oacf_lag_frame = OACF(
+            cls.traj,
+            skip=0.0,
+            nav=n,                # use as many origins as possible
+            max_lag_fraction=1.0, # origins span the entire trajectory
+            mode="lag_frame",
+            max_workers=1,
+        )
+
+        # --- lag_step at full extent (lag runs over every frame) ---
+        cls.oacf_lag_step = OACF(
+            cls.traj,
+            skip=0.0,
+            nav=n,                # evaluate at every frame
+            max_lag_step=n,       # allow lags up to the full trajectory length
+            mode="lag_step",
+            max_workers=1,
+        )
+
+    # ------------------------------------------------------------------
+    # Helper
+    # ------------------------------------------------------------------
+    def _interpolate_to_common_times(self, times_a, values_a, times_b, values_b):
+        """Return values of b interpolated onto the time grid of a,
+        restricted to the overlapping range."""
+        t_min = max(times_a[0], times_b[0])
+        t_max = min(times_a[-1], times_b[-1])
+        mask_a = (times_a >= t_min) & (times_a <= t_max)
+        t_common = times_a[mask_a]
+        v_a = values_a[mask_a]
+        v_b = np.interp(t_common, times_b, values_b)
+        return t_common, v_a, v_b
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+    def test_lag_step_starts_at_one(self):
+        """lag_step OACF should be normalised to 1 at t=0 (zero lag)."""
+        frames = self.oacf_lag_step.frames
+        self.assertAlmostEqual(
+            frames[0], 1.0, places=6,
+            msg="lag_step OACF must equal 1 at zero lag."
+        )
+
+    def test_lag_frame_starts_at_one(self):
+        """lag_frame OACF should be normalised to 1 at t=0 (zero lag)."""
+        frames = self.oacf_lag_frame.frames
+        self.assertAlmostEqual(
+            frames[0], 1.0, places=6,
+            msg="lag_frame OACF must equal 1 at zero lag."
+        )
+
+    def test_modes_agree_on_overlapping_times(self):
+        """lag_frame and lag_step curves must agree within 1e-6 on shared times.
+
+        Both modes include every available time origin and every possible lag,
+        so they sample the same set of (t0, t0+Δt) pairs and must yield the
+        same averaged dot-product per lag Δt.
+        """
+        t_frame = self.oacf_lag_frame.times
+        v_frame = self.oacf_lag_frame.frames
+        t_step  = self.oacf_lag_step.times
+        v_step  = self.oacf_lag_step.frames
+
+        _, v_f_common, v_s_common = self._interpolate_to_common_times(
+            t_frame, v_frame, t_step, v_step
+        )
+
+        np.testing.assert_allclose(
+            v_f_common, v_s_common, atol=1e-6,
+            err_msg=(
+                "lag_frame and lag_step OACF disagree beyond numerical noise "
+                "when both modes cover the full trajectory."
+            )
+        )
+
+    def test_oacf_bounded(self):
+        """OACF values must stay in [-1, 1] for unit orientation vectors."""
+        for mode_name, oacf in [
+            ("lag_frame", self.oacf_lag_frame),
+            ("lag_step",  self.oacf_lag_step),
+        ]:
+            frames = oacf.frames
+            valid = frames[~np.isnan(frames)]
+            self.assertTrue(
+                np.all(valid <= 1.0 + 1e-9) and np.all(valid >= -1.0 - 1e-9),
+                msg=f"{mode_name} OACF has values outside [-1, 1]: {valid.min():.4f} … {valid.max():.4f}"
+            )
+
+    def test_oacf_monotone_decay(self):
+        """OACF should be non-increasing on average (orientations decorrelate).
+
+        We check that the mean of the second half is not larger than the mean
+        of the first half — a weak sanity check that does not assume exponential
+        decay.
+        """
+        for mode_name, oacf in [
+            ("lag_frame", self.oacf_lag_frame),
+            ("lag_step",  self.oacf_lag_step),
+        ]:
+            frames = oacf.frames
+            n = len(frames)
+            first_half  = np.nanmean(frames[:n // 2])
+            second_half = np.nanmean(frames[n // 2:])
+            self.assertLessEqual(
+                second_half, first_half + 0.05,   # allow 5 % tolerance
+                msg=f"{mode_name} OACF does not decay: "
+                    f"first half mean={first_half:.4f}, second half mean={second_half:.4f}"
+            )
+
