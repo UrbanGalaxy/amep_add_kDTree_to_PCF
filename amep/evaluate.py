@@ -4531,7 +4531,7 @@ class OACF(BaseEvaluation):
                  max_workers: int | None = 1,
                  mode: str = 'std',
                  max_lag_fraction: float = 0.5,
-                 max_lag_step: int = 20,
+                 max_lag_step: int = 50,
                  )-> None:
         r'''
         Calculate the orientational autocorrelation function
@@ -4657,6 +4657,8 @@ class OACF(BaseEvaluation):
                 for i in range(self.__nskip, self.__traj.nframes)
             ])  # shape: (n_usable, n_particles, n_components)
 
+            self.__norm = (self.__orientations * self.__orientations).sum(axis=-1).mean()
+            print(self.__norm)
             # Store the first usable index so __compute_lag can derive lags correctly
             self.__first_index = int(np.ceil(self.__skip * self.__traj.nframes))
             max_N_eval = int(self.__nskip + self.__max_lag_step) - 1
@@ -4779,6 +4781,7 @@ class OACF(BaseEvaluation):
         result[:n_lags] = (v0 * vt).sum(axis=-1) / norm    # (n_lags, N)
 
         return result
+
     def __compute_lag_step(self, frame):
         r'''
         Computation for a single frame in lag mode.
@@ -4800,12 +4803,9 @@ class OACF(BaseEvaluation):
         lag = j - self.__first_index
 
         n_usable = self.__orientations.shape[0]
-        max_lag = int(n_usable * self.__max_lag_fraction)
 
         if lag <= 0:
             return 1.0
-
-        lag = min(lag, max_lag)
 
         n_origins = n_usable - lag
 
@@ -4815,9 +4815,8 @@ class OACF(BaseEvaluation):
 
         # dot product summed over components, then averaged over particles and origins
         dot  = (v0 * vt).sum(axis=-1).mean()
-        norm = (v0 * v0).sum(axis=-1).mean()
 
-        return dot / norm
+        return dot / self.__norm
 
     @property
     def direction(self):
