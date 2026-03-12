@@ -106,7 +106,7 @@ def average_func(
         available CPU cores. Negative numbers will be translated
         to `AVAILABLE_CPUS + max_workers`.
     max_N_eval: int, optional
-        Number of last frame average_func should evaluate func for
+        frame index of the last frame average_func should evaluate func for
     **kwargs: Keyword Arguments
         keyword arguments that are put to func
 

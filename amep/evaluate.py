@@ -4655,14 +4655,15 @@ class OACF(BaseEvaluation):
             self.__orientations = np.array([
                 self.__traj[i].orientations(ptype=self.__ptype)[:, self.__components]
                 for i in range(self.__nskip, self.__traj.nframes)
-            ])  # shape: (n_usable, n_particles, n_components)
+            ])
 
+            # Calculates norm to use
             self.__norm = (self.__orientations * self.__orientations).sum(axis=-1).mean()
-            print(self.__norm)
+
             # Store the first usable index so __compute_lag can derive lags correctly
             self.__first_index = int(np.ceil(self.__skip * self.__traj.nframes))
             max_N_eval = int(self.__nskip + self.__max_lag_step) - 1
-            print(max_N_eval)
+
             self.__frames, self.__avg, self.__indices = average_func(
                 self.__compute_lag_step, self.__traj, skip=self.__skip,
                 nr=self.__nav, indices=True,
@@ -4677,7 +4678,6 @@ class OACF(BaseEvaluation):
             ])
 
             n_usable = self.__orientations.shape[0]
-            n_particles = self.__orientations.shape[1]
 
             max_origins = int(n_usable * self.__max_lag_fraction)
             n_origins = min(self.__nav, max_origins)
@@ -4733,54 +4733,6 @@ class OACF(BaseEvaluation):
         v = frame.orientations(ptype=self.__ptype)
 
         return acf(v0[:,self.__components], v[:,self.__components])
-    
-    def __compute_lag_frame(self, frame):
-        r'''
-        Compute the full OACF curve for a single origin frame.
-        Returns an array of length n_usable, nan-padded beyond
-        the available lags for this origin.
-
-        Parameters
-        ----------
-        frame : BaseFrame
-            The origin frame (frame0) for this OACF curve.
-
-        Returns
-        -------
-        np.ndarray
-            OACF values of length n_usable.
-        '''
-        # j = np.searchsorted(self.__traj.times, frame.time)
-        # oi = j - self.__nskip  # index into self.__orientations
-
-        # n_usable = self.__orientations.shape[0]
-        # v0   = self.__orientations[oi]       # (N, d)
-        # norm = (v0 * v0).sum(axis=-1).mean()
-
-        # vt   = self.__orientations[oi:]      # (n_lags, N, d)
-        # n_lags = vt.shape[0]
-
-        # result = np.full(n_usable, np.nan)
-        # # result[:n_lags] = (v0 * vt).sum(axis=-1).mean(axis=1) / norm
-        # result[:n_lags] = (v0 * vt).sum(axis=-1) / norm 
-
-        # return result
-        j = np.searchsorted(self.__traj.times, frame.time)
-        oi = j - self.__nskip
-
-        n_usable = self.__orientations.shape[0]
-        n_particles = self.__orientations.shape[1]  # add this
-
-        v0   = self.__orientations[oi]       # (N, d)
-        norm = (v0 * v0).sum(axis=-1).mean()
-
-        vt     = self.__orientations[oi:]    # (n_lags, N, d)
-        n_lags = vt.shape[0]
-
-        result = np.full((n_usable, n_particles), np.nan)  # 2D now
-        result[:n_lags] = (v0 * vt).sum(axis=-1) / norm    # (n_lags, N)
-
-        return result
 
     def __compute_lag_step(self, frame):
         r'''
