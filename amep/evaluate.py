@@ -33,8 +33,10 @@ observables from simulation data of particle-based and continuum simulations.
 # =============================================================================
 from packaging.version import Version
 from collections.abc import Callable
+from tqdm import tqdm
 import warnings
 import numpy as np
+
 
 from .utils import average_func, kpeaks, rotate_coords, in_box, sq_from_sf2d
 from .base import BaseEvaluation
@@ -4670,32 +4672,33 @@ class OACF(BaseEvaluation):
             self.__orientations = np.array([
                 self.__traj[i].orientations(ptype=self.__ptype)[:, self.__components]
                 for i in range(self.__nskip, self.__traj.nframes)
-            ])  # shape: (n_usable, N, d)
+            ])
 
             n_usable = self.__orientations.shape[0]
-            
+            n_particles = self.__orientations.shape[1]
 
-            # max_lag_fraction controls what fraction of usable frames are used as origins
             max_origins = int(n_usable * self.__max_lag_fraction)
             n_origins = min(self.__nav, max_origins)
-            # n_origins = min(self.__nav, n_usable)
             origin_indices = np.array(
-                np.ceil(np.linspace(0, n_usable - 1, n_origins)), dtype=int
-            )
-            origin_frames = np.array(
-                [self.__traj[self.__nskip + oi] for oi in origin_indices],
-                dtype=object
+                np.ceil(np.linspace(0, max_origins - 1, n_origins)), dtype=int
             )
 
-            # average_func iterates over origin_frames, __compute_lag returns
-            # a full curve per origin, average_func averages them into one curve
-            raw, _, _ = average_func(
-                self.__compute_lag_frame, origin_frames, skip=0.0,
-                nr=n_origins, indices=True,
-                max_workers=self.__max_workers
-            )  # raw shape: (n_origins, n_usable)
+            # Accumulate weighted sum manually to avoid storing
+            # the full (n_origins, n_usable, n_particles) array
+            acc   = np.zeros(n_usable)   # sum of dot products
+            count = np.zeros(n_usable)   # number of valid contributions
 
-            self.__frames  = np.nanmean(raw, axis=0)
+            for oi in tqdm(origin_indices):
+                v0     = self.__orientations[oi]     # (N, d)
+                norm   = (v0 * v0).sum(axis=-1).mean()
+                vt     = self.__orientations[oi:]    # (n_lags, N, d)
+                n_lags = vt.shape[0]
+                # mean over particles for each lag, shape (n_lags,)
+                dots   = (v0 * vt).sum(axis=-1).mean(axis=1) / norm
+                acc[:n_lags]   += dots
+                count[:n_lags] += 1
+
+            self.__frames  = acc / count
             self.__avg     = float(np.nanmean(self.__frames))
             self.__times   = self.__traj.times[self.__nskip:self.__nskip + n_usable] \
                         - self.__traj.times[self.__nskip]
@@ -4745,18 +4748,35 @@ class OACF(BaseEvaluation):
         np.ndarray
             OACF values of length n_usable.
         '''
+        # j = np.searchsorted(self.__traj.times, frame.time)
+        # oi = j - self.__nskip  # index into self.__orientations
+
+        # n_usable = self.__orientations.shape[0]
+        # v0   = self.__orientations[oi]       # (N, d)
+        # norm = (v0 * v0).sum(axis=-1).mean()
+
+        # vt   = self.__orientations[oi:]      # (n_lags, N, d)
+        # n_lags = vt.shape[0]
+
+        # result = np.full(n_usable, np.nan)
+        # # result[:n_lags] = (v0 * vt).sum(axis=-1).mean(axis=1) / norm
+        # result[:n_lags] = (v0 * vt).sum(axis=-1) / norm 
+
+        # return result
         j = np.searchsorted(self.__traj.times, frame.time)
-        oi = j - self.__nskip  # index into self.__orientations
+        oi = j - self.__nskip
 
         n_usable = self.__orientations.shape[0]
+        n_particles = self.__orientations.shape[1]  # add this
+
         v0   = self.__orientations[oi]       # (N, d)
         norm = (v0 * v0).sum(axis=-1).mean()
 
-        vt   = self.__orientations[oi:]      # (n_lags, N, d)
+        vt     = self.__orientations[oi:]    # (n_lags, N, d)
         n_lags = vt.shape[0]
 
-        result = np.full(n_usable, np.nan)
-        result[:n_lags] = (v0 * vt).sum(axis=-1).mean(axis=1) / norm
+        result = np.full((n_usable, n_particles), np.nan)  # 2D now
+        result[:n_lags] = (v0 * vt).sum(axis=-1) / norm    # (n_lags, N)
 
         return result
     def __compute_lag_step(self, frame):
