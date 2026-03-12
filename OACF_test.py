@@ -49,17 +49,17 @@ oacf_step = amep.evaluate.OACF(
     traj=traj,
     nav=traj.nframes ,
     direction='xy',
-    max_workers=10,
+    max_workers=2,
     mode='lag_step',
-    max_lag_fraction=1.0,
-    max_lag_step = 1001,
+    max_lag_fraction=0.1,
+    max_lag_step = 10,
 )
 
 oacf_frame = amep.evaluate.OACF(
     traj=traj,
     nav=traj.nframes ,
     direction='xy',
-    max_workers=10,
+    max_workers=2,
     mode='lag_frame',
     max_lag_fraction=1,
 )
@@ -228,7 +228,11 @@ fig.savefig(output_path, dpi=150)
 plt.show()
 print(f"Figure saved to {output_path}")
 # %%
-print(oacf_custom[1:10],)
-print(oacf_step.frames[:].shape)
-print(oacf.frames[1:10])
+frame = traj[0]
+mu = frame.orientations()
+print(mu.shape)
+print(mu[:5])
+print(np.linalg.norm(mu, axis=1)[:5])
+print(0.0883579**2 + 0.744777**2)
+print(0.518026**2 + 0.542356**2)
 # %%
