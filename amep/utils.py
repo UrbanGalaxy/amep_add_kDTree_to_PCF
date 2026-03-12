@@ -2281,4 +2281,3 @@ def available_cpu_count() -> int:
         return len(os.sched_getaffinity(0))
     else:
         return os.cpu_count()
-    
