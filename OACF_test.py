@@ -38,11 +38,13 @@ nframes = traj.nframes  # now 1000
 
 # %%
 # ── Built-in OACF (single reference frame, unnormalised) ────────────────────
+skip_frac = 0.4
 oacf = amep.evaluate.OACF(
     traj=traj,
     nav=traj.nframes ,
     direction='xy',
-    max_workers=1
+    max_workers=1,
+    skip=skip_frac,
 )
 
 oacf_step = amep.evaluate.OACF(
@@ -51,8 +53,8 @@ oacf_step = amep.evaluate.OACF(
     direction='xy',
     max_workers=10,
     mode='lag_step',
-    max_lag_fraction=1.0,
-    max_lag_step = 1001,
+    max_lag_step = 601,
+    skip=skip_frac,
 )
 
 oacf_frame = amep.evaluate.OACF(
@@ -62,6 +64,7 @@ oacf_frame = amep.evaluate.OACF(
     max_workers=10,
     mode='lag_frame',
     max_lag_fraction=1,
+    skip=skip_frac,
 )
 
 
@@ -181,10 +184,13 @@ fig, axes = plt.subplots(1, 3, figsize=(17, 5))
 Dr = 2.44861
 t_ref_builtin = oacf.times[1:]
 t_ref_builtin = t_ref_builtin * 0.00001
+t_ref_builtin = t_ref_builtin - (t_ref_builtin[-1] * skip_frac) - 1
 t_ref_builtin_2 = oacf_step.times[1:]
 t_ref_builtin_2 = t_ref_builtin_2 * 0.00001
+t_ref_builtin_2 = t_ref_builtin_2 - (t_ref_builtin_2[-1] * skip_frac) -1
 t_ref_builtin_frame = oacf_frame.times[1:]
 t_ref_builtin_frame = t_ref_builtin_frame * 0.00001
+t_ref_builtin_frame = t_ref_builtin_frame - (t_ref_builtin_frame[-1] * skip_frac) 
 # t_ref_custom  = lag_times[1:]
 # t_ref_custom = t_ref_custom * 0.00001
 
