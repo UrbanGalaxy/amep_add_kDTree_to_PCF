@@ -30,7 +30,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(script_dir, "test", "data")
 data_folder = os.path.join(
     data_dir,
-    "lammps_atom_25000_eta_0.596_e_100_Pe_36.0_D_1.0_Dr_2.44861_seed_5.h5amep"
+    "lammps_atom_25000_eta_0.594_e_100_Pe_36.0_D_1.0_Dr_2.44861_seed_3.h5amep"
 )
 traj = amep.load.traj(data_folder)
 # traj = TrajView(traj, start=00)
@@ -237,4 +237,6 @@ print(f"Figure saved to {output_path}")
 print(oacf_custom[1:10],)
 print(oacf_step.frames[:].shape)
 print(oacf.frames[1:10])
+diff_oacf = oacf_step.frames[1:] - oacf_frame.frames[1:-1]
+print(max(abs(diff_oacf)))
 # %%
