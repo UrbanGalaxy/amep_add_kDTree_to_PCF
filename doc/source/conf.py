@@ -7,9 +7,16 @@ https://www.sphinx-doc.org/en/master/usage/configuration.html
 https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 """
 project = 'AMEP'
-copyright = '2023-2025, Lukas Hecht, Kay-Robert Dormann, Kai Luca Spanheimer'
+copyright = '2023-2026, Lukas Hecht, Kay-Robert Dormann, Kai Luca Spanheimer'
 author = 'Lukas Hecht, Kay-Robert Dormann, Kai Luca Spanheimer'
-release = '1.2.0'
+
+# get version info from amep package
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+from amep._version import __version__
+release = __version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
