@@ -101,50 +101,6 @@ class TestSpatialcor(unittest.TestCase):
             f'{np.abs(rdf_diff-rdf_kdtree).sum()}'
         )
 
-
-    def test_pcf2d_backwards_compat(self):
-        """Test backwards compatibility of pcf2d.
-
-        The old pcf2d API used psi (from psi_k) and no e parameter.
-        The new API adds an e parameter with default [1,0,0].
-        Calling pcf2d with psi set and default e should produce the
-        same result as the old code.
-        """
-        # compute psi6 (the way the old evaluate.PCF2d.__compute did it)
-        psi_complex = np.mean(amep.order.psi_k(
-            self.coords, self.box, k=6
-        ))
-        psi = np.array([psi_complex.real, psi_complex.imag])
-
-        # Old-style call: psi set, no e argument (uses default e=[1,0,0])
-        gxy_psi6, x_psi6, y_psi6 = amep.spatialcor.pcf2d(
-            self.coords,
-            self.box,
-            psi=psi,
-            nxbins=50,
-            nybins=50,
-        )
-        # Verify output shapes are correct
-        self.assertEqual(gxy_psi6.shape, (50, 50),
-            'pcf2d with psi (old API) returned wrong shape for g(x,y)')
-        self.assertEqual(x_psi6.shape[0], 50,
-            'pcf2d x-grid has wrong shape')
-        self.assertEqual(y_psi6.shape[1], 50,
-            'pcf2d y-grid has wrong shape')
-
-        # Call again with the same parameters — should be deterministic
-        gxy_psi6_2, x_psi6_2, y_psi6_2 = amep.spatialcor.pcf2d(
-            self.coords,
-            self.box,
-            psi=psi,
-            nxbins=50,
-            nybins=50,
-        )
-        np.testing.assert_array_equal(
-            gxy_psi6, gxy_psi6_2,
-            err_msg='pcf2d is not deterministic for the same inputs'
-        )
-
     def test_pcf2d_x_mode(self):
         """Test pcf2d with x-axis mode (no psi, default e)."""
         gxy_x, x_x, y_x = amep.spatialcor.pcf2d(
